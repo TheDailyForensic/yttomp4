@@ -22,18 +22,49 @@ def download():
     url = request.form.get('url')
     file_format = request.form.get('format')
     
-    # Cloud-optimized configuration rules
+    # Flattened settings to guarantee no spacing errors occur
     ydl_opts = {
         'outtmpl': os.path.join(DOWNLOAD_FOLDER, '%(title)s.%(ext)s'),
         'restrictfilenames': True,
         'quiet': True,
         'no_warnings': True,
-        # Emulate standard client browsers to bypass data-center proxy restrictions
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
+            'Accept-Language': 'en-us,en;q=0.5'
         }
+    }
+    
+    if file_format == 'mp3':
+        ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '128'}]
+    else:
+        ydl_opts['format'] = 'best[ext=mp4]/best'
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+            
+            if file_format == 'mp3':
+                filename = os.path.splitext(filename)[0] + '.mp3'
+            
+            if not os.path.exists(filename):
+                return jsonify({"error": "File was processed but output could not be found."}), 500
+                
+            safe_basename = re.sub(r'[^\x00-\x7F]+', '', os.path.basename(filename))
+            
+            return send_file(
+                filename, 
+                as_attachment=True, 
+                download_name=safe_basename
+            )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
     }
     
     if file_format == 'mp3':
