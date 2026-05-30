@@ -1,7 +1,7 @@
 import os
 import re
+import requests
 from flask import Flask, request, Response, jsonify
-import yt_dlp
 
 app = Flask(__name__)
 
@@ -11,7 +11,7 @@ def home():
         with open('index.html', 'r', encoding='utf-8') as f:
             return f.read()
     except FileNotFoundError:
-        return "Error: index.html file not found.", 404
+        return "Error: index.html file not found in the repository.", 404
 
 @app.route('/download', methods=['POST'])
 def download():
@@ -21,19 +21,61 @@ def download():
     if not url:
         return jsonify({"error": "No URL provided"}), 400
 
-    # Configure yt-dlp to extract the direct video link instead of downloading it
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'format': 'bestaudio[ext=m4a]/best' if file_format == 'mp3' else 'best[ext=mp4]/best',
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }
-    }
-
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Extract video information without downloading the file
+        # Requesting data processing from Cobalt's public API endpoint
+        api_url = "https://api.cobalt.tools/api/json"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "url": url,
+            "filenamePattern": "basic"
+        }
+        
+        # Adjust API parameters depending on what the user wants
+        if file_format == 'mp3':
+            payload["isAudioOnly"] = True
+            payload["audioFormat"] = "mp3"
+        else:
+            payload["videoCodec"] = "h264"  # Forces clean, universally readable MP4 files
+            
+        api_response = requests.post(api_url, json=payload, headers=headers)
+        
+        if api_response.status_code != 200:
+            return jsonify({"error": "The stream processing infrastructure rejected the request layout."}), 500
+            
+        data = api_response.json()
+        if data.get("status") == "error":
+            return jsonify({"error": data.get("text", "Unknown engine error")}), 500
+            
+        stream_url = data.get("url")
+        if not stream_url:
+            return jsonify({"error": "Failed to resolve downstream data transport links."}), 500
+            
+        # Establish a live chunked data pipeline from the resolved link back to the browser
+        file_stream = requests.get(stream_url, stream=True)
+        
+        def generate():
+            for chunk in file_stream.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+
+        safe_name = f"download.{file_format}"
+        response_headers = {
+            'Content-Disposition': f'attachment; filename="{safe_name}"',
+            'Content-Type': 'audio/mpeg' if file_format == 'mp3' else 'video/mp4'
+        }
+        
+        return Response(generate(), headers=response_headers)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
             info = ydl.extract_info(url, download=False)
             stream_url = info.get('url')
             title = info.get('title', 'download')
