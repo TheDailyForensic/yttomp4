@@ -1,39 +1,69 @@
 import os
 import re
-from flask import Flask, request, send_file, render_template_string
+from flask import Flask, request, send_file, jsonify
+from flask_cors import CORS
 import yt_dlp
 
 app = Flask(__name__)
-DOWNLOAD_FOLDER = 'downloads'
+# CORS allows your GitHub Pages site to securely talk to this Render backend
+CORS(app)
 
-# Ensure the downloads directory exists locally
+DOWNLOAD_FOLDER = '/tmp/downloads'
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
-# Unified Frontend: HTML, CSS, and JavaScript in one block
-HTML_INTERFACE = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local Media Converter</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #121212;
-            color: #ffffff;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
-        .converter-container {
-            background-color: #1e1e1e;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+@app.route('/')
+def home():
+    return jsonify({"status": "Backend running successfully"}), 200
+
+@app.route('/download', methods=['POST'])
+def download():
+    url = request.form.get('url')
+    file_format = request.form.get('format')
+    
+    ydl_opts = {
+        'outtmpl': os.path.join(DOWNLOAD_FOLDER, '%(title)s.%(ext)s'),
+        'restrictfilenames': True,
+    }
+    
+    if file_format == 'mp3':
+        ydl_opts.update({
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        })
+    else:
+        # Note: Free tier Render environments lack FFmpeg by default, 
+        # so merging streams might fail unless a custom buildpack is used.
+        # This fallback selects pre-merged formats if available.
+        ydl_opts.update({
+            'format': 'best[ext=mp4]/best', 
+        })
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+            
+            if file_format == 'mp3':
+                filename = os.path.splitext(filename)[0] + '.mp3'
+            
+            safe_basename = re.sub(r'[^\x00-\x7F]+', '', os.path.basename(filename))
+            
+            return send_file(
+                filename, 
+                as_attachment=True, 
+                download_name=safe_basename
+            )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
             text-align: center;
             width: 400px;
         }
