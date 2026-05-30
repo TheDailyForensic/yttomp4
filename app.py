@@ -1,20 +1,22 @@
 import os
 import re
 from flask import Flask, request, send_file, jsonify
-from flask_cors import CORS
 import yt_dlp
 
 app = Flask(__name__)
-# CORS allows your GitHub Pages site to securely talk to this Render backend
-CORS(app)
 
 DOWNLOAD_FOLDER = '/tmp/downloads'
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
+# Tell Flask to read your index.html file for the home route
 @app.route('/')
 def home():
-    return jsonify({"status": "Backend running successfully"}), 200
+    try:
+        with open('index.html', 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        return "Error: index.html file not found in the repository.", 404
 
 @app.route('/download', methods=['POST'])
 def download():
@@ -34,6 +36,33 @@ def download():
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
+        })
+    else:
+        ydl_opts.update({
+            'format': 'best[ext=mp4]/best', 
+        })
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+            
+            if file_format == 'mp3':
+                filename = os.path.splitext(filename)[0] + '.mp3'
+            
+            safe_basename = re.sub(r'[^\x00-\x7F]+', '', os.path.basename(filename))
+            
+            return send_file(
+                filename, 
+                as_attachment=True, 
+                download_name=safe_basename
+            )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
         })
     else:
         # Note: Free tier Render environments lack FFmpeg by default, 
