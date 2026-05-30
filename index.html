@@ -74,9 +74,6 @@
     </div>
 
     <script>
-        // REPLACE THIS URL WITH YOUR ACTUAL RENDER WEB SERVICE URL
-        const BACKEND_URL = "https://YOUR-RENDER-APP-NAME.onrender.com";
-
         document.getElementById('downloadForm').addEventListener('submit', async function(e) {
             e.preventDefault();
 
@@ -88,10 +85,11 @@
 
             submitBtn.disabled = true;
             statusMessage.classList.remove('hidden');
-            statusText.innerText = "Connecting to backend deployment...";
+            statusText.innerText = "Processing request on the server...";
 
             try {
-                const response = await fetch(`${BACKEND_URL}/download`, {
+                // Hits the /download endpoint directly on the same server
+                const response = await fetch('/download', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: `url=${encodeURIComponent(url)}&format=${format}`
@@ -99,7 +97,7 @@
 
                 if (!response.ok) throw new Error('Backend failed to process download.');
 
-                statusText.innerText = "Transmitting file to browser...";
+                statusText.innerText = "Sending file to your browser...";
                 const blob = await response.blob();
                 const downloadUrl = window.URL.createObjectURL(blob);
                 
