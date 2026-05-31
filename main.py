@@ -63,15 +63,15 @@ def clean_url(url: str) -> str:
 
 
 QUALITY_MAP = {
-    "144":  "bestvideo[height<=144]+bestaudio/best[height<=144]",
-    "240":  "bestvideo[height<=240]+bestaudio/best[height<=240]",
-    "360":  "bestvideo[height<=360]+bestaudio/best[height<=360]",
-    "480":  "bestvideo[height<=480]+bestaudio/best[height<=480]",
-    "720":  "bestvideo[height<=720]+bestaudio/best[height<=720]",
-    "1080": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-    "1440": "bestvideo[height<=1440]+bestaudio/best[height<=1440]",
-    "2160": "bestvideo[height<=2160]+bestaudio/best[height<=2160]",
-    "max":  "bestvideo+bestaudio/best",
+    "144":  "bestvideo[height<=144][ext=mp4]+bestaudio[ext=m4a]/best[height<=144]",
+    "240":  "bestvideo[height<=240][ext=mp4]+bestaudio[ext=m4a]/best[height<=240]",
+    "360":  "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]",
+    "480":  "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]",
+    "720":  "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]",
+    "1080": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]",
+    "1440": "bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/best[height<=1440]",
+    "2160": "bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]/best[height<=2160]",
+    "max":  "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
 }
 
 
