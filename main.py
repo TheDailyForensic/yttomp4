@@ -21,6 +21,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+@app.get("/debug")
+def debug():
+    return {
+        "cookies_env": os.getenv("COOKIES_PATH"),
+        "src_exists": _src.exists(),
+        "tmp_exists": COOKIES_FILE.exists() if COOKIES_FILE else False,
+        "tmp_path": str(COOKIES_FILE) if COOKIES_FILE else None,
+        "tmp_size": COOKIES_FILE.stat().st_size if COOKIES_FILE and COOKIES_FILE.exists() else 0,
+    }
 
 BASE_DIR = Path(__file__).parent
 
