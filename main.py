@@ -3,14 +3,14 @@ import re
 import tempfile
 import urllib.parse
 from pathlib import Path
-
+import imageio.plugins.ffmpeg as _ffmpeg_plugin
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
 app = FastAPI(title="ytdl")
-
+os.environ["PATH"] += os.pathsep + str(_ffmpeg_plugin.get_exe().parent)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
