@@ -1,6 +1,5 @@
 import os
 import re
-import subprocess
 import tempfile
 import urllib.parse
 from pathlib import Path
@@ -8,10 +7,9 @@ from pathlib import Path
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from fastapi.responses import FileResponse, HTMLResponse
 
-app = FastAPI(title="yt-dlp API")
+app = FastAPI(title="ytdl")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,6 +18,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+BASE_DIR = Path(__file__).parent
+
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -27,6 +27,10 @@ def clean_url(url: str) -> str:
     parsed = urllib.parse.urlparse(url)
     qs = urllib.parse.parse_qs(parsed.query)
     clean_qs = {k: v for k, v in qs.items() if k == "v"}
+    # handle youtu.be short links
+    if parsed.hostname == "youtu.be":
+        video_id = parsed.path.lstrip("/").split("?")[0]
+        return f"https://www.youtube.com/watch?v={video_id}"
     clean = parsed._replace(query=urllib.parse.urlencode(clean_qs, doseq=True))
     return urllib.parse.urlunparse(clean) if clean_qs else url
 
@@ -46,9 +50,11 @@ QUALITY_MAP = {
 
 # ── routes ─────────────────────────────────────────────────────────────────
 
-@app.get("/")
-def root():
-    return {"status": "ok"}
+@app.get("/", response_class=HTMLResponse)
+def serve_frontend():
+    """Serve the frontend HTML directly from the repo root."""
+    html_file = BASE_DIR / "index.html"
+    return HTMLResponse(content=html_file.read_text(encoding="utf-8"))
 
 
 @app.get("/info")
@@ -76,7 +82,6 @@ def download(
 ):
     url = clean_url(url)
     tmp_dir = tempfile.mkdtemp()
-
     outtmpl = os.path.join(tmp_dir, "%(title)s.%(ext)s")
 
     if fmt == "mp3":
@@ -102,11 +107,10 @@ def download(
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+            ydl.extract_info(url, download=True)
     except yt_dlp.utils.DownloadError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Find the output file
     files = list(Path(tmp_dir).iterdir())
     if not files:
         raise HTTPException(status_code=500, detail="Download produced no file")
