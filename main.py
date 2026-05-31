@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import tempfile
 import urllib.parse
 from pathlib import Path
@@ -11,7 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
 os.environ["PATH"] += os.pathsep + imageio_ffmpeg.get_ffmpeg_exe().rsplit("/", 1)[0]
+
 app = FastAPI(title="ytdl")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,13 +24,19 @@ app.add_middleware(
 
 BASE_DIR = Path(__file__).parent
 
-# Cookies file — checks env var first, then falls back to project root
-COOKIES_FILE = Path(os.getenv("COOKIES_PATH", BASE_DIR / "cookies.txt"))
+# Copy cookies to /tmp (writable) so yt-dlp can update it
+_src = Path(os.getenv("COOKIES_PATH", BASE_DIR / "cookies.txt"))
+if _src.exists():
+    _writable_cookies = Path(tempfile.gettempdir()) / "cookies.txt"
+    shutil.copy2(_src, _writable_cookies)
+    COOKIES_FILE = _writable_cookies
+else:
+    COOKIES_FILE = None
 
 COMMON_OPTS = {
     "quiet": True,
     "no_warnings": True,
-    **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
+    **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE else {}),
 }
 
 
