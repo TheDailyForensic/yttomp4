@@ -1,145 +1,123 @@
 import os
 import re
-import requests
-from flask import Flask, request, Response, jsonify
+import subprocess
+import tempfile
+import urllib.parse
+from pathlib import Path
 
-app = Flask(__name__)
+import yt_dlp
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
-@app.route('/')
-def home():
+app = FastAPI(title="yt-dlp API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ── helpers ────────────────────────────────────────────────────────────────
+
+def clean_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    qs = urllib.parse.parse_qs(parsed.query)
+    clean_qs = {k: v for k, v in qs.items() if k == "v"}
+    clean = parsed._replace(query=urllib.parse.urlencode(clean_qs, doseq=True))
+    return urllib.parse.urlunparse(clean) if clean_qs else url
+
+
+QUALITY_MAP = {
+    "144":  "bestvideo[height<=144]+bestaudio/best[height<=144]",
+    "240":  "bestvideo[height<=240]+bestaudio/best[height<=240]",
+    "360":  "bestvideo[height<=360]+bestaudio/best[height<=360]",
+    "480":  "bestvideo[height<=480]+bestaudio/best[height<=480]",
+    "720":  "bestvideo[height<=720]+bestaudio/best[height<=720]",
+    "1080": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+    "1440": "bestvideo[height<=1440]+bestaudio/best[height<=1440]",
+    "2160": "bestvideo[height<=2160]+bestaudio/best[height<=2160]",
+    "max":  "bestvideo+bestaudio/best",
+}
+
+
+# ── routes ─────────────────────────────────────────────────────────────────
+
+@app.get("/")
+def root():
+    return {"status": "ok"}
+
+
+@app.get("/info")
+def get_info(url: str = Query(...)):
+    url = clean_url(url)
     try:
-        with open('index.html', 'r', encoding='utf-8') as f:
-            return f.read()
-    except FileNotFoundError:
-        return "Error: index.html file not found in the repository.", 404
-
-@app.route('/download', methods=['POST'])
-def download():
-    url = request.form.get('url')
-    file_format = request.form.get('format')
-    
-    if not url:
-        return jsonify({"error": "No URL provided"}), 400
-
-    try:
-        # Requesting data processing from Cobalt's public API endpoint
-        api_url = "https://api.cobalt.tools/api/json"
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "url": url,
-            "filenamePattern": "basic"
-        }
-        
-        # Adjust API parameters depending on what the user wants
-        if file_format == 'mp3':
-            payload["isAudioOnly"] = True
-            payload["audioFormat"] = "mp3"
-        else:
-            payload["videoCodec"] = "h264"  # Forces clean, universally readable MP4 files
-            
-        api_response = requests.post(api_url, json=payload, headers=headers)
-        
-        if api_response.status_code != 200:
-            return jsonify({"error": "The stream processing infrastructure rejected the request layout."}), 500
-            
-        data = api_response.json()
-        if data.get("status") == "error":
-            return jsonify({"error": data.get("text", "Unknown engine error")}), 500
-            
-        stream_url = data.get("url")
-        if not stream_url:
-            return jsonify({"error": "Failed to resolve downstream data transport links."}), 500
-            
-        # Establish a live chunked data pipeline from the resolved link back to the browser
-        file_stream = requests.get(stream_url, stream=True)
-        
-        def generate():
-            for chunk in file_stream.iter_content(chunk_size=8192):
-                if chunk:
-                    yield chunk
-
-        safe_name = f"download.{file_format}"
-        response_headers = {
-            'Content-Disposition': f'attachment; filename="{safe_name}"',
-            'Content-Type': 'audio/mpeg' if file_format == 'mp3' else 'video/mp4'
-        }
-        
-        return Response(generate(), headers=response_headers)
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
             info = ydl.extract_info(url, download=False)
-            stream_url = info.get('url')
-            title = info.get('title', 'download')
-            
-            if not stream_url:
-                return jsonify({"error": "Could not extract stream URL."}), 500
+        return {
+            "title":     info.get("title", "Unknown"),
+            "duration":  info.get("duration_string", "?"),
+            "thumbnail": info.get("thumbnail", ""),
+            "channel":   info.get("channel", ""),
+            "url":       url,
+        }
+    except yt_dlp.utils.DownloadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-            # Clean up the filename
-            safe_title = re.sub(r'[^\x00-\x7F]+', '', title).replace(' ', '_')
-            ext = 'm4a' if file_format == 'mp3' else 'mp4'  # Use m4a for audio to avoid heavy server-side mp3 conversion
-            filename = f"{safe_title}.{ext}"
 
-            # Open a live connection to the stream URL and pipe it directly to the user
-            import requests
-            req = requests.get(stream_url, stream=True)
-            
-            def generate():
-                for chunk in req.iter_content(chunk_size=8192):
-                    if chunk:
-                        yield chunk
+@app.get("/download")
+def download(
+    url:     str = Query(...),
+    fmt:     str = Query("mp4"),
+    quality: str = Query("1080"),
+):
+    url = clean_url(url)
+    tmp_dir = tempfile.mkdtemp()
 
-            # Return a streaming response directly to the browser
-            headers = {
-                'Content-Disposition': f'attachment; filename="{filename}"',
-                'Content-Type': 'audio/mp4' if file_format == 'mp3' else 'video/mp4'
-            }
-            
-            return Response(generate(), headers=headers)
+    outtmpl = os.path.join(tmp_dir, "%(title)s.%(ext)s")
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
-    ydl_opts['http_headers'] = headers
-
-    if file_format == 'mp3':
-        ydl_opts['format'] = 'bestaudio/best'
-        ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '128'}]
+    if fmt == "mp3":
+        opts = {
+            "format": "bestaudio/best",
+            "outtmpl": outtmpl,
+            "quiet": True,
+            "no_warnings": True,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "320",
+            }],
+        }
     else:
-        ydl_opts['format'] = 'best[ext=mp4]/best'
+        opts = {
+            "format": QUALITY_MAP.get(quality, "bestvideo+bestaudio/best"),
+            "outtmpl": outtmpl,
+            "quiet": True,
+            "no_warnings": True,
+            "merge_output_format": "mp4",
+        }
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            
-            if file_format == 'mp3':
-                filename = os.path.splitext(filename)[0] + '.mp3'
-            
-            if not os.path.exists(filename):
-                return jsonify({"error": "Output file missing."}), 500
-                
-            safe_basename = re.sub(r'[^\x00-\x7F]+', '', os.path.basename(filename))
-            
-            return send_file(
-                filename, 
-                as_attachment=True, 
-                download_name=safe_basename
-            )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except yt_dlp.utils.DownloadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    # Find the output file
+    files = list(Path(tmp_dir).iterdir())
+    if not files:
+        raise HTTPException(status_code=500, detail="Download produced no file")
+
+    out_file = files[0]
+    safe_name = re.sub(r'[^\w\s\-.]', '', out_file.name).strip()
+    media_type = "audio/mpeg" if fmt == "mp3" else "video/mp4"
+
+    return FileResponse(
+        path=str(out_file),
+        media_type=media_type,
+        filename=safe_name,
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
