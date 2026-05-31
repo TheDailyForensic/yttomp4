@@ -48,13 +48,9 @@ else:
 COMMON_OPTS = {
     "quiet": True,
     "no_warnings": True,
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["web"],
-        }
-    },
+    "proxy": "http://fiqjnpti-rotate:8nom3jrscn7q@p.webshare.io:80",
+    **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE else {}),
 }
-
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
