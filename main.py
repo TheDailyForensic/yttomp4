@@ -20,6 +20,15 @@ app.add_middleware(
 
 BASE_DIR = Path(__file__).parent
 
+# Cookies file — checks env var first, then falls back to project root
+COOKIES_FILE = Path(os.getenv("COOKIES_PATH", BASE_DIR / "cookies.txt"))
+
+COMMON_OPTS = {
+    "quiet": True,
+    "no_warnings": True,
+    **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
+}
+
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -27,7 +36,6 @@ def clean_url(url: str) -> str:
     parsed = urllib.parse.urlparse(url)
     qs = urllib.parse.parse_qs(parsed.query)
     clean_qs = {k: v for k, v in qs.items() if k == "v"}
-    # handle youtu.be short links
     if parsed.hostname == "youtu.be":
         video_id = parsed.path.lstrip("/").split("?")[0]
         return f"https://www.youtube.com/watch?v={video_id}"
@@ -52,7 +60,6 @@ QUALITY_MAP = {
 
 @app.get("/", response_class=HTMLResponse)
 def serve_frontend():
-    """Serve the frontend HTML directly from the repo root."""
     html_file = BASE_DIR / "index.html"
     return HTMLResponse(content=html_file.read_text(encoding="utf-8"))
 
@@ -61,7 +68,7 @@ def serve_frontend():
 def get_info(url: str = Query(...)):
     url = clean_url(url)
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+        with yt_dlp.YoutubeDL(COMMON_OPTS) as ydl:
             info = ydl.extract_info(url, download=False)
         return {
             "title":     info.get("title", "Unknown"),
@@ -86,10 +93,9 @@ def download(
 
     if fmt == "mp3":
         opts = {
+            **COMMON_OPTS,
             "format": "bestaudio/best",
             "outtmpl": outtmpl,
-            "quiet": True,
-            "no_warnings": True,
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
@@ -98,10 +104,9 @@ def download(
         }
     else:
         opts = {
+            **COMMON_OPTS,
             "format": QUALITY_MAP.get(quality, "bestvideo+bestaudio/best"),
             "outtmpl": outtmpl,
-            "quiet": True,
-            "no_warnings": True,
             "merge_output_format": "mp4",
         }
 
