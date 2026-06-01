@@ -1,15 +1,13 @@
 import os
 import re
-import shutil
-import tempfile
 import urllib.parse
 from pathlib import Path
 
+import httpx
 import imageio_ffmpeg
-import yt_dlp
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 
 os.environ["PATH"] += os.pathsep + imageio_ffmpeg.get_ffmpeg_exe().rsplit("/", 1)[0]
 
@@ -21,61 +19,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-import sys
-
-@app.get("/debug")
-def debug():
-    return {
-        "python": sys.version,
-        "yt_dlp": yt_dlp.version.__version__,
-        "cookies_env": os.getenv("COOKIES_PATH"),
-        "src_exists": _src.exists(),
-        "tmp_exists": COOKIES_FILE.exists() if COOKIES_FILE else False,
-        "tmp_size": COOKIES_FILE.stat().st_size if COOKIES_FILE and COOKIES_FILE.exists() else 0,
-    }
 
 BASE_DIR = Path(__file__).parent
 
-# Copy cookies to /tmp (writable) so yt-dlp can update it
-_src = Path(os.getenv("COOKIES_PATH", BASE_DIR / "cookies.txt"))
-if _src.exists():
-    _writable_cookies = Path(tempfile.gettempdir()) / "cookies.txt"
-    shutil.copy2(_src, _writable_cookies)
-    COOKIES_FILE = _writable_cookies
-else:
-    COOKIES_FILE = None
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "6d17e6275fmsh6816e08a32191dcp157126jsn5236c140a20f")
+RAPIDAPI_HOST = "youtube-to-mp315.p.rapidapi.com"
 
-COMMON_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-    "proxy": "http://fiqjnpti-rotate:8nom3jrscn7q@p.webshare.io:80",
-    **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE else {}),
+HEADERS = {
+    "x-rapidapi-key": RAPIDAPI_KEY,
+    "x-rapidapi-host": RAPIDAPI_HOST,
 }
+
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
-def clean_url(url: str) -> str:
+def extract_video_id(url: str) -> str:
     parsed = urllib.parse.urlparse(url)
-    qs = urllib.parse.parse_qs(parsed.query)
-    clean_qs = {k: v for k, v in qs.items() if k == "v"}
     if parsed.hostname == "youtu.be":
-        video_id = parsed.path.lstrip("/").split("?")[0]
-        return f"https://www.youtube.com/watch?v={video_id}"
-    clean = parsed._replace(query=urllib.parse.urlencode(clean_qs, doseq=True))
-    return urllib.parse.urlunparse(clean) if clean_qs else url
-
-
-QUALITY_MAP = {
-    "144":  "bestvideo[height<=144][ext=mp4]+bestaudio[ext=m4a]/best[height<=144]",
-    "240":  "bestvideo[height<=240][ext=mp4]+bestaudio[ext=m4a]/best[height<=240]",
-    "360":  "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]",
-    "480":  "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]",
-    "720":  "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]",
-    "1080": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]",
-    "1440": "bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/best[height<=1440]",
-    "2160": "bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]/best[height<=2160]",
-    "max":  "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
-}
+        return parsed.path.lstrip("/").split("?")[0]
+    qs = urllib.parse.parse_qs(parsed.query)
+    if "v" in qs:
+        return qs["v"][0]
+    raise HTTPException(status_code=400, detail="Could not extract video ID from URL")
 
 
 # ── routes ─────────────────────────────────────────────────────────────────
@@ -87,68 +52,95 @@ def serve_frontend():
 
 
 @app.get("/info")
-def get_info(url: str = Query(...)):
-    url = clean_url(url)
-    try:
-        with yt_dlp.YoutubeDL(COMMON_OPTS) as ydl:
-            info = ydl.extract_info(url, download=False)
-        return {
-            "title":     info.get("title", "Unknown"),
-            "duration":  info.get("duration_string", "?"),
-            "thumbnail": info.get("thumbnail", ""),
-            "channel":   info.get("channel", ""),
-            "url":       url,
-        }
-    except yt_dlp.utils.DownloadError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+async def get_info(url: str = Query(...)):
+    video_id = extract_video_id(url)
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            res = await client.get(
+                f"https://{RAPIDAPI_HOST}/dl",
+                params={"id": video_id},
+                headers=HEADERS,
+            )
+            data = res.json()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    if res.status_code != 200 or data.get("status") == "fail":
+        raise HTTPException(status_code=400, detail=data.get("mess", "Failed to fetch video info"))
+
+    return {
+        "title":     data.get("title", "Unknown"),
+        "duration":  data.get("duration", "?"),
+        "thumbnail": data.get("thumb", ""),
+        "channel":   data.get("a", ""),
+        "url":       url,
+        "formats":   data.get("links", {}),
+    }
 
 
 @app.get("/download")
-def download(
+async def download(
     url:     str = Query(...),
     fmt:     str = Query("mp4"),
     quality: str = Query("1080"),
 ):
-    url = clean_url(url)
-    tmp_dir = tempfile.mkdtemp()
-    outtmpl = os.path.join(tmp_dir, "%(title)s.%(ext)s")
+    video_id = extract_video_id(url)
 
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            res = await client.get(
+                f"https://{RAPIDAPI_HOST}/dl",
+                params={"id": video_id},
+                headers=HEADERS,
+            )
+            data = res.json()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    if res.status_code != 200 or data.get("status") == "fail":
+        raise HTTPException(status_code=400, detail=data.get("mess", "Failed to fetch video"))
+
+    links = data.get("links", {})
+
+    # Pick the right download URL
+    download_url = None
     if fmt == "mp3":
-        opts = {
-            **COMMON_OPTS,
-            "format": "bestaudio/best",
-            "outtmpl": outtmpl,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "320",
-            }],
-        }
+        mp3_links = links.get("mp3", {})
+        # grab first available mp3
+        for k, v in mp3_links.items():
+            download_url = v.get("url")
+            break
     else:
-        opts = {
-            **COMMON_OPTS,
-            "format": QUALITY_MAP.get(quality, "bestvideo+bestaudio/best"),
-            "outtmpl": outtmpl,
-            "merge_output_format": "mp4",
-        }
+        mp4_links = links.get("mp4", {})
+        # try to match quality, fall back to best available
+        quality_map = {"1080": "1080", "720": "720", "480": "480", "360": "360", "240": "240", "144": "144"}
+        target = quality_map.get(quality, "1080")
+        for k, v in mp4_links.items():
+            if target in k:
+                download_url = v.get("url")
+                break
+        if not download_url:
+            # fallback to first available
+            for k, v in mp4_links.items():
+                download_url = v.get("url")
+                break
 
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.extract_info(url, download=True)
-    except yt_dlp.utils.DownloadError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    if not download_url:
+        raise HTTPException(status_code=400, detail="No download URL found for requested format")
 
-    files = list(Path(tmp_dir).iterdir())
-    if not files:
-        raise HTTPException(status_code=500, detail="Download produced no file")
-
-    out_file = files[0]
-    safe_name = re.sub(r'[^\w\s\-.]', '', out_file.name).strip()
+    # Stream the file from the download URL to the client
+    title = re.sub(r'[^\w\s\-.]', '', data.get("title", "video")).strip()
+    filename = f"{title}.{fmt}"
     media_type = "audio/mpeg" if fmt == "mp3" else "video/mp4"
 
-    return FileResponse(
-        path=str(out_file),
+    async def stream_file():
+        async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
+            async with client.stream("GET", download_url) as r:
+                async for chunk in r.aiter_bytes(chunk_size=1024 * 64):
+                    yield chunk
+
+    return StreamingResponse(
+        stream_file(),
         media_type=media_type,
-        filename=safe_name,
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
