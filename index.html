@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ytdl</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0a0a0a;
+      --surface:  #111111;
+      --border:   #222222;
+      --border2:  #333333;
+      --text:     #e8e8e8;
+      --muted:    #666666;
+      --accent:   #c8f557;
+      --accent2:  #a8d93a;
+      --red:      #ff5555;
+      --mono:     'IBM Plex Mono', monospace;
+      --sans:     'IBM Plex Sans', sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    .wrap { width: 100%; max-width: 540px; }
+
+    /* header */
+    .header { margin-bottom: 2.5rem; }
+    .header h1 {
+      font-family: var(--mono);
+      font-size: 1.5rem;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      color: var(--accent);
+    }
+    .header p {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.3rem;
+      font-family: var(--mono);
+    }
+
+    /* card */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+    }
+
+    /* url input row */
+    .url-row { display: flex; gap: 0.5rem; }
+    .url-row input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      padding: 0.65rem 0.9rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .url-row input::placeholder { color: var(--muted); }
+    .url-row input:focus { border-color: var(--accent); }
+
+    .btn-look {
+      background: var(--accent);
+      color: #0a0a0a;
+      border: none;
+      border-radius: 8px;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      font-weight: 500;
+      padding: 0 1.1rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .btn-look:hover { background: var(--accent2); }
+    .btn-look:active { transform: scale(0.97); }
+    .btn-look:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    /* video info preview */
+    .preview {
+      display: none;
+      margin-top: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      animation: fadein 0.2s ease;
+    }
+    .preview.show { display: flex; }
+    .preview img {
+      width: 120px;
+      min-width: 120px;
+      object-fit: cover;
+    }
+    .preview-info {
+      padding: 0.75rem 1rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0.2rem;
+      overflow: hidden;
+    }
+    .preview-title {
+      font-size: 0.85rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .preview-meta {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+
+    /* options grid */
+    .options {
+      display: none;
+      margin-top: 1.25rem;
+      gap: 0.75rem;
+      animation: fadein 0.2s ease;
+    }
+    .options.show { display: grid; grid-template-columns: 1fr 1fr; }
+
+    .field label {
+      display: block;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.4rem;
+    }
+    .field select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      padding: 0.6rem 0.8rem;
+      outline: none;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.75rem center;
+      transition: border-color 0.15s;
+    }
+    .field select:focus { border-color: var(--accent); }
+
+    /* download button */
+    .btn-dl {
+      display: none;
+      width: 100%;
+      margin-top: 1.25rem;
+      background: var(--accent);
+      color: #0a0a0a;
+      border: none;
+      border-radius: 8px;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      font-weight: 500;
+      padding: 0.8rem;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      animation: fadein 0.2s ease;
+    }
+    .btn-dl.show { display: block; }
+    .btn-dl:hover { background: var(--accent2); }
+    .btn-dl:active { transform: scale(0.98); }
+    .btn-dl:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* status bar */
+    .status {
+      margin-top: 1rem;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      min-height: 1.2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .status.err  { color: var(--red); }
+    .status.ok   { color: var(--accent); }
+    .status.info { color: var(--muted); }
+
+    /* spinner */
+    .spin {
+      width: 12px; height: 12px;
+      border: 2px solid var(--border2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      flex-shrink: 0;
+    }
+
+    /* progress bar */
+    .progress-wrap {
+      display: none;
+      margin-top: 0.75rem;
+      height: 3px;
+      background: var(--border);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .progress-wrap.show { display: block; }
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      border-radius: 99px;
+      transition: width 0.3s ease;
+    }
+    .progress-bar.indeterminate {
+      width: 40%;
+      animation: slide 1s ease-in-out infinite alternate;
+    }
+
+    /* footer */
+    .footer {
+      margin-top: 2rem;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    .footer a { color: var(--muted); text-decoration: underline; }
+
+    @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    @keyframes spin    { to { transform: rotate(360deg); } }
+    @keyframes slide   { from { margin-left: 0; } to { margin-left: 60%; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1>ytdl.</h1>
+    <p>paste a youtube url. pick a format. get the file.</p>
+  </div>
+
+  <div class="card">
+    <!-- URL input -->
+    <div class="url-row">
+      <input id="urlInput" type="text" placeholder="https://youtu.be/..." autocomplete="off" spellcheck="false" />
+      <button class="btn-look" id="lookBtn" onclick="lookupVideo()">look up</button>
+    </div>
+
+    <!-- Preview -->
+    <div class="preview" id="preview">
+      <img id="thumb" src="" alt="thumbnail" />
+      <div class="preview-info">
+        <div class="preview-title" id="previewTitle"></div>
+        <div class="preview-meta" id="previewMeta"></div>
+      </div>
+    </div>
+
+    <!-- Options -->
+    <div class="options" id="options">
+      <div class="field">
+        <label>Format</label>
+        <select id="fmtSelect" onchange="onFmtChange()">
+          <option value="mp4">MP4 (video)</option>
+          <option value="mp3">MP3 (audio)</option>
+        </select>
+      </div>
+      <div class="field" id="qualityField">
+        <label>Quality</label>
+        <select id="qualitySelect">
+          <option value="1080">1080p</option>
+          <option value="720">720p</option>
+          <option value="480">480p</option>
+          <option value="360">360p</option>
+          <option value="240">240p</option>
+          <option value="144">144p</option>
+          <option value="1440">1440p</option>
+          <option value="2160">4K</option>
+          <option value="max">Max</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Download button -->
+    <button class="btn-dl" id="dlBtn" onclick="startDownload()">↓ download</button>
+
+    <!-- Status -->
+    <div class="status info" id="status"></div>
+
+    <!-- Progress -->
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar indeterminate" id="progressBar"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    powered by <a href="https://github.com/yt-dlp/yt-dlp" target="_blank">yt-dlp</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/" target="_blank">source</a>
+  </div>
+</div>
+
+<script>
+  // ── CONFIG — replace with your Render backend URL after deploying ──────
+  const API = "";  // empty = same origin, works on Render automatically
+
+  const $ = id => document.getElementById(id);
+
+  function setStatus(msg, type = "info", spinner = false) {
+    const el = $("status");
+    el.className = `status ${type}`;
+    el.innerHTML = spinner
+      ? `<div class="spin"></div>${msg}`
+      : msg;
+  }
+
+  function showProgress(show) {
+    $("progressWrap").classList.toggle("show", show);
+  }
+
+  function cleanUrl(url) {
+    try {
+      const u = new URL(url);
+      const v = u.searchParams.get("v");
+      if (v) return `https://www.youtube.com/watch?v=${v}`;
+      // youtu.be short links
+      if (u.hostname === "youtu.be") {
+        const id = u.pathname.slice(1).split("?")[0];
+        return `https://www.youtube.com/watch?v=${id}`;
+      }
+    } catch {}
+    return url;
+  }
+
+  function onFmtChange() {
+    const isAudio = $("fmtSelect").value === "mp3";
+    $("qualityField").style.opacity = isAudio ? "0.3" : "1";
+    $("qualityField").style.pointerEvents = isAudio ? "none" : "auto";
+  }
+
+  async function lookupVideo() {
+    const raw = $("urlInput").value.trim();
+    if (!raw) return;
+
+    const url = cleanUrl(raw);
+    $("urlInput").value = url;
+
+    $("lookBtn").disabled = true;
+    $("preview").classList.remove("show");
+    $("options").classList.remove("show");
+    $("dlBtn").classList.remove("show");
+    setStatus("fetching video info…", "info", true);
+    showProgress(true);
+
+    try {
+      const res = await fetch(`${API}/info?url=${encodeURIComponent(url)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Could not fetch video");
+
+      $("thumb").src = data.thumbnail;
+      $("previewTitle").textContent = data.title;
+      $("previewMeta").textContent = `${data.channel}  ·  ${data.duration}`;
+      $("preview").classList.add("show");
+      $("options").classList.add("show");
+      $("dlBtn").classList.add("show");
+      setStatus("", "info");
+      showProgress(false);
+    } catch (e) {
+      setStatus(e.message, "err");
+      showProgress(false);
+    } finally {
+      $("lookBtn").disabled = false;
+    }
+  }
+
+  async function startDownload() {
+    const url     = $("urlInput").value.trim();
+    const fmt     = $("fmtSelect").value;
+    const quality = $("qualitySelect").value;
+
+    $("dlBtn").disabled = true;
+    setStatus("preparing download… (this can take a moment)", "info", true);
+    showProgress(true);
+    $("progressBar").classList.add("indeterminate");
+
+    try {
+      const endpoint = `${API}/download?url=${encodeURIComponent(url)}&fmt=${fmt}&quality=${quality}`;
+      const res = await fetch(endpoint);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Download failed");
+      }
+
+      // Stream blob → trigger browser save dialog
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const nameMatch = disposition.match(/filename="?([^"]+)"?/);
+      const filename = nameMatch ? nameMatch[1] : `download.${fmt}`;
+
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+
+      setStatus("✓ download started", "ok");
+      showProgress(false);
+    } catch (e) {
+      setStatus(e.message, "err");
+      showProgress(false);
+    } finally {
+      $("dlBtn").disabled = false;
+      $("progressBar").classList.remove("indeterminate");
+    }
+  }
+
+  // Allow pressing Enter in URL field
+  $("urlInput").addEventListener("keydown", e => {
+    if (e.key === "Enter") lookupVideo();
+  });
+</script>
+</body>
+</html>
